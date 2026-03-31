@@ -1,6 +1,10 @@
 Flask
 flask-cors
 Pillow
-numpy
 opencv-python
+numpy
 scipy
+gunicorn
+eventlet
+python-dotenv
+werkzeug
