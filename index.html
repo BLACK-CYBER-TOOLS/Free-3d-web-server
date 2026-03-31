@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D to 3D Converter | Free AI Tool</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎨 2D to 3D Converter</h1>
+            <p>Rasmni 3D modelga aylantirish | FREE TOOL</p>
+        </header>
+
+        <div class="main-content">
+            <!-- Upload Section -->
+            <div class="upload-section">
+                <div class="upload-area" id="uploadArea">
+                    <input type="file" id="imageInput" accept="image/*" hidden>
+                    <div class="upload-icon">📸</div>
+                    <h3>Rasm yuklang</h3>
+                    <p>JPG, PNG, GIF | Max 5MB</p>
+                    <button class="upload-btn" onclick="document.getElementById('imageInput').click()">
+                        Fayl tanlash
+                    </button>
+                </div>
+
+                <!-- Settings -->
+                <div class="settings">
+                    <h3>⚙️ Sozlamalar</h3>
+                    <div class="setting-item">
+                        <label>Depth Scale:</label>
+                        <input type="range" id="depthScale" min="0" max="2" step="0.01" value="0.5">
+                        <span id="depthValue">0.5</span>
+                    </div>
+                    <div class="setting-item">
+                        <label>Quality:</label>
+                        <select id="quality">
+                            <option value="low">Low (Fast)</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="high">High (Slow)</option>
+                        </select>
+                    </div>
+                    <div class="setting-item">
+                        <label>Mesh Type:</label>
+                        <select id="meshType">
+                            <option value="plane">Plane</option>
+                            <option value="cylinder">Cylinder</option>
+                            <option value="sphere">Sphere</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button class="convert-btn" id="convertBtn" disabled>
+                    🔄 3D Model yaratish
+                </button>
+            </div>
+
+            <!-- 3D Preview -->
+            <div class="preview-section">
+                <div id="canvasContainer">
+                    <canvas id="canvas3d"></canvas>
+                </div>
+                <div class="controls">
+                    <button onclick="resetCamera()">🎥 Reset Camera</button>
+                    <button onclick="downloadModel()">💾 Download (GLB)</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading -->
+        <div id="loading" class="loading" style="display: none;">
+            <div class="spinner"></div>
+            <p>3D model yaratilmoqda...</p>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+                          </html>
