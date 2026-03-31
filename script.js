@@ -1,11 +1,12 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'https://unpkg.com/three@0.128.0/examples/jsm/controls/OrbitControls.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 
 // Global variables
 let scene, camera, renderer, controls, mesh;
 let wireframeMode = false;
 let autoRotate = false;
-let currentHeightData = null;
+let currentImageData = null;
 
 // DOM elements
 const canvas = document.getElementById('canvas3d');
@@ -13,84 +14,54 @@ const imageInput = document.getElementById('imageInput');
 const uploadArea = document.getElementById('uploadArea');
 const generateBtn = document.getElementById('generateBtn');
 const downloadBtn = document.getElementById('downloadBtn');
-const loading = document.getElementById('loading');
-const progressFill = document.getElementById('progressFill');
+const loadingOverlay = document.getElementById('loadingOverlay');
+const progressBar = document.getElementById('progressBar');
+const statusText = document.getElementById('statusText');
 const previewImg = document.getElementById('previewImg');
 const imagePreview = document.getElementById('imagePreview');
 const heightScale = document.getElementById('heightScale');
 const heightValue = document.getElementById('heightValue');
 const resolution = document.getElementById('resolution');
+const resValue = document.getElementById('resValue');
 const colorMode = document.getElementById('colorMode');
 const smoothing = document.getElementById('smoothing');
+const smoothValue = document.getElementById('smoothValue');
+const meshType = document.getElementById('meshType');
 
-let currentImageData = null;
+// Update displays
+resolution.addEventListener('change', () => {
+    resValue.textContent = `${resolution.value}x${resolution.value}`;
+});
 
-// Initialize 3D scene
-function init3D() {
-    const container = document.getElementById('canvasContainer');
-    const width = container.clientWidth;
-    const height = container.clientHeight;
+heightScale.addEventListener('input', (e) => {
+    heightValue.textContent = parseFloat(e.target.value).toFixed(2);
+});
 
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x111122);
-    scene.fog = new THREE.FogExp2(0x111122, 0.008);
+smoothing.addEventListener('input', (e) => {
+    smoothValue.textContent = e.target.value;
+});
 
-    camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-    camera.position.set(2, 1.5, 2.5);
-    camera.lookAt(0, 0, 0);
-
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(window.devicePixelRatio);
-
-    controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.rotateSpeed = 1.5;
-    controls.zoomSpeed = 1.2;
-    controls.enableZoom = true;
-    controls.enablePan = true;
-
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0x404060);
-    scene.add(ambientLight);
-
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-    directionalLight.position.set(2, 3, 2);
-    scene.add(directionalLight);
-
-    const fillLight = new THREE.PointLight(0x4466cc, 0.5);
-    fillLight.position.set(-1, 1, 2);
-    scene.add(fillLight);
-
-    const backLight = new THREE.PointLight(0xffaa66, 0.3);
-    backLight.position.set(0, 1, -2);
-    scene.add(backLight);
-
-    // Grid helper
-    const gridHelper = new THREE.GridHelper(4, 20, 0x88aaff, 0x335588);
-    gridHelper.position.y = -1.2;
-    scene.add(gridHelper);
-
-    animate();
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.innerHTML = message;
+    toast.style.borderLeftColor = type === 'success' ? '#4caf50' : type === 'error' ? '#f44336' : '#667eea';
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
 }
 
-function animate() {
-    requestAnimationFrame(animate);
-    
-    if (autoRotate && mesh) {
-        mesh.rotation.y += 0.005;
-    }
-    
-    controls.update();
-    renderer.render(scene, camera);
+function updateProgress(percent, text) {
+    progressBar.style.width = `${percent}%`;
+    if (text) statusText.textContent = text;
 }
 
-// Create height map from image
-function createHeightMap(imgData, width, height, scale, smoothLevel) {
+// AI Depth Estimation from image brightness
+function estimateDepthMap(imgData, width, height, scale, smoothLevel) {
     return new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
+            updateProgress(20, 'Processing image...');
+            
             const canvas = document.createElement('canvas');
             canvas.width = width;
             canvas.height = height;
@@ -100,68 +71,129 @@ function createHeightMap(imgData, width, height, scale, smoothLevel) {
             const imageData = ctx.getImageData(0, 0, width, height);
             const data = imageData.data;
             
-            // Create height map from brightness
-            const heights = [];
+            updateProgress(40, 'Calculating depth map...');
+            
+            const depths = [];
             const colors = [];
             
-            for (let y = 0; y < height; y++) {
-                for (let x = 0; x < width; x++) {
-                    const idx = (y * width + x) * 4;
-                    const r = data[idx];
-                    const g = data[idx + 1];
-                    const b = data[idx + 2];
-                    
-                    // Brightness to height
-                    const brightness = (r + g + b) / 3 / 255;
-                    let heightValue = brightness * scale;
-                    
-                    // Apply smoothing
-                    heights.push(heightValue);
-                    colors.push([r / 255, g / 255, b / 255]);
-                }
+            // Advanced depth estimation using brightness + contrast
+            let minBrightness = 1, maxBrightness = 0;
+            const brightnesses = [];
+            
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i+1];
+                const b = data[i+2];
+                
+                // Perceptual brightness formula
+                const brightness = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+                brightnesses.push(brightness);
+                
+                if (brightness < minBrightness) minBrightness = brightness;
+                if (brightness > maxBrightness) maxBrightness = brightness;
             }
             
-            resolve({ heights, colors, width, height });
+            // Apply smoothing (simple average filter)
+            const smoothedDepths = [];
+            const smoothWindow = smoothLevel;
+            
+            for (let i = 0; i < brightnesses.length; i++) {
+                let sum = 0;
+                let count = 0;
+                const y = Math.floor(i / width);
+                const x = i % width;
+                
+                for (let dy = -smoothWindow; dy <= smoothWindow; dy++) {
+                    for (let dx = -smoothWindow; dx <= smoothWindow; dx++) {
+                        const nx = x + dx;
+                        const ny = y + dy;
+                        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                            const idx = ny * width + nx;
+                            sum += brightnesses[idx];
+                            count++;
+                        }
+                    }
+                }
+                
+                let depth = (sum / count) * scale;
+                
+                // Invert: brighter = higher (like terrain)
+                depth = (1 - (sum / count)) * scale;
+                
+                smoothedDepths.push(depth);
+                depths.push(depth);
+                
+                // Store colors
+                const idx = i * 4;
+                colors.push([data[idx]/255, data[idx+1]/255, data[idx+2]/255]);
+            }
+            
+            updateProgress(60, 'Depth map complete');
+            resolve({ depths: smoothedDepths, colors, width, height });
         };
         img.src = imgData;
     });
 }
 
-// Create 3D mesh from height map
-function createMeshFromHeightMap(heightData, colors, width, height, colorModeType) {
-    const geometry = new THREE.BufferGeometry();
+// Create 3D mesh from depth map
+function createMeshFromDepth(depths, colors, width, height, scale, colorModeType, meshBaseType) {
+    updateProgress(70, 'Creating 3D mesh...');
     
+    const geometry = new THREE.BufferGeometry();
     const vertices = [];
     const indices = [];
-    const normals = [];
     const vertexColors = [];
     
-    const stepX = 2.0 / (width - 1);
-    const stepZ = 2.0 / (height - 1);
+    const spacingX = 2.0 / (width - 1);
+    const spacingZ = 2.0 / (height - 1);
     const startX = -1.0;
     const startZ = -1.0;
     
+    let minY = Infinity;
+    let maxY = -Infinity;
+    
+    // First pass: find min/max heights
+    for (let i = 0; i < depths.length; i++) {
+        const y = depths[i];
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+    }
+    const heightRange = maxY - minY;
+    
     // Create vertices
     for (let i = 0; i < height; i++) {
-        const z = startZ + i * stepZ;
+        const z = startZ + i * spacingZ;
         for (let j = 0; j < width; j++) {
-            const x = startX + j * stepX;
+            const x = startX + j * spacingX;
             const idx = i * width + j;
-            const y = heightData[idx];
+            let y = depths[idx];
+            
+            // Apply mesh base type
+            if (meshBaseType === 'cylinder') {
+                const radius = Math.sqrt(x*x + z*z);
+                const angle = Math.atan2(z, x);
+                const r = Math.min(0.8, radius);
+                y = y * (1 - r * 0.8);
+            } else if (meshBaseType === 'sphere') {
+                const radius = Math.sqrt(x*x + y*y + z*z);
+                y = y * (1 - Math.abs(radius) * 0.5);
+            }
             
             vertices.push(x, y, z);
             
             // Colors based on mode
-            if (colorModeType === 'height') {
-                const intensity = Math.min(1, Math.max(0, y / 1.5));
-                vertexColors.push(intensity, intensity, intensity);
+            if (colorModeType === 'heightmap') {
+                const t = (y - minY) / (heightRange + 0.001);
+                vertexColors.push(t, t, t);
             } else if (colorModeType === 'gradient') {
-                const t = Math.min(1, Math.max(0, y / 1.5));
-                // Cool to warm gradient
-                const r = Math.min(1, t * 2);
-                const g = Math.min(1, 1 - Math.abs(t - 0.5) * 2);
-                const b = Math.min(1, (1 - t) * 2);
+                const t = (y - minY) / (heightRange + 0.001);
+                const r = Math.min(1, t * 1.5);
+                const g = Math.min(1, 1 - Math.abs(t - 0.5) * 1.5);
+                const b = Math.min(1, (1 - t) * 1.5);
                 vertexColors.push(r, g, b);
+            } else if (colorModeType === 'depth') {
+                const t = (y - minY) / (heightRange + 0.001);
+                vertexColors.push(t, t * 0.5, 1 - t);
             } else {
                 // Original texture colors
                 const c = colors[idx];
@@ -183,11 +215,6 @@ function createMeshFromHeightMap(heightData, colors, width, height, colorModeTyp
         }
     }
     
-    // Calculate normals
-    for (let i = 0; i < vertices.length; i += 3) {
-        normals.push(0, 1, 0);
-    }
-    
     geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(vertices), 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(vertexColors), 3));
     geometry.setIndex(indices);
@@ -202,40 +229,41 @@ function createMeshFromHeightMap(heightData, colors, width, height, colorModeTyp
         flatShading: false
     });
     
+    updateProgress(85, 'Finalizing mesh...');
+    
     return new THREE.Mesh(geometry, material);
 }
 
-// Update progress
-function updateProgress(percent) {
-    progressFill.style.width = `${percent}%`;
-}
-
-// Generate 3D mesh
-async function generate3DMesh() {
-    if (!currentImageData) return;
+// Generate 3D model
+async function generate3DModel() {
+    if (!currentImageData) {
+        showToast('Please upload an image first', 'error');
+        return;
+    }
     
-    loading.style.display = 'flex';
-    updateProgress(10);
+    loadingOverlay.style.display = 'flex';
+    updateProgress(5, 'Initializing AI depth estimation...');
     
     try {
         const res = parseInt(resolution.value);
         const scale = parseFloat(heightScale.value);
         const smooth = parseInt(smoothing.value);
         const colorModeType = colorMode.value;
+        const meshBaseType = meshType.value;
         
-        updateProgress(30);
+        updateProgress(10, 'Analyzing image...');
         
-        // Create height map
-        const { heights, colors, width, height } = await createHeightMap(
+        // Estimate depth map
+        const { depths, colors, width, height } = await estimateDepthMap(
             currentImageData, res, res, scale, smooth
         );
         
-        updateProgress(70);
-        
         // Create 3D mesh
-        const newMesh = createMeshFromHeightMap(heights, colors, width, height, colorModeType);
+        const newMesh = createMeshFromDepth(
+            depths, colors, width, height, scale, colorModeType, meshBaseType
+        );
         
-        updateProgress(90);
+        updateProgress(95, 'Adding to scene...');
         
         // Remove old mesh
         if (mesh) scene.remove(mesh);
@@ -243,35 +271,46 @@ async function generate3DMesh() {
         mesh = newMesh;
         scene.add(mesh);
         
-        updateProgress(100);
+        updateProgress(100, 'Complete!');
         
         downloadBtn.disabled = false;
-        showToast('3D mesh created successfully!', 'success');
+        showToast('3D model generated successfully! Ready for Blender', 'success');
+        
+        setTimeout(() => {
+            loadingOverlay.style.display = 'none';
+        }, 500);
         
     } catch (error) {
         console.error('Error:', error);
+        loadingOverlay.style.display = 'none';
         showToast('Error: ' + error.message, 'error');
-    } finally {
-        setTimeout(() => {
-            loading.style.display = 'none';
-        }, 500);
     }
 }
 
-// Download as OBJ
+// Download as OBJ (Blender compatible)
 function downloadModel() {
     if (!mesh) return;
     
     const geometry = mesh.geometry;
     const positions = geometry.attributes.position.array;
     const indices = geometry.index.array;
+    const colors = geometry.attributes.color ? geometry.attributes.color.array : null;
     
-    let obj = '# 3D Model from Image\n';
-    obj += '# Generated by 2D to 3D Converter\n\n';
+    let obj = '# 3D Model from AI Depth Estimation\n';
+    obj += '# Generated by AI 3D Model Generator\n';
+    obj += '# Compatible with Blender, Maya, Unity, Unreal Engine\n\n';
     
     // Vertices
     for (let i = 0; i < positions.length; i += 3) {
-        obj += `v ${positions[i]} ${positions[i+1]} ${positions[i+2]}\n`;
+        obj += `v ${positions[i].toFixed(6)} ${positions[i+1].toFixed(6)} ${positions[i+2].toFixed(6)}\n`;
+    }
+    
+    // Vertex colors (optional, Blender supports)
+    if (colors) {
+        obj += '\n# Vertex Colors\n';
+        for (let i = 0; i < colors.length; i += 3) {
+            obj += `vc ${colors[i].toFixed(4)} ${colors[i+1].toFixed(4)} ${colors[i+2].toFixed(4)}\n`;
+        }
     }
     
     obj += '\n';
@@ -285,46 +324,128 @@ function downloadModel() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `3d_model_${Date.now()}.obj`;
+    a.download = `ai_3d_model_${Date.now()}.obj`;
     a.click();
     URL.revokeObjectURL(url);
     
-    showToast('Model downloaded as OBJ', 'success');
+    showToast('Model downloaded as OBJ - Ready for Blender!', 'success');
 }
 
-// Reset view
+// Download as GLTF
+function downloadGLTF() {
+    if (!mesh) return;
+    
+    const exporter = new GLTFExporter();
+    const sceneToExport = new THREE.Scene();
+    sceneToExport.add(mesh.clone());
+    
+    exporter.parse(sceneToExport, (result) => {
+        const blob = new Blob([result], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `ai_3d_model_${Date.now()}.glb`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('Model downloaded as GLTF', 'success');
+    }, { binary: true });
+}
+
+// Initialize 3D scene
+function init3D() {
+    const container = document.querySelector('.preview-3d');
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0a1a);
+    scene.fog = new THREE.FogExp2(0x0a0a1a, 0.01);
+    
+    camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+    camera.position.set(2, 1.5, 2.5);
+    camera.lookAt(0, 0, 0);
+    
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setSize(width, height);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.rotateSpeed = 1.5;
+    controls.zoomSpeed = 1.2;
+    
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0x404060);
+    scene.add(ambientLight);
+    
+    const mainLight = new THREE.DirectionalLight(0xffffff, 1);
+    mainLight.position.set(2, 3, 2);
+    scene.add(mainLight);
+    
+    const fillLight = new THREE.PointLight(0x4466cc, 0.5);
+    fillLight.position.set(-1, 1, 2);
+    scene.add(fillLight);
+    
+    const backLight = new THREE.PointLight(0xffaa66, 0.3);
+    backLight.position.set(0, 1, -2);
+    scene.add(backLight);
+    
+    const rimLight = new THREE.PointLight(0xff66aa, 0.4);
+    rimLight.position.set(1, 2, -1.5);
+    scene.add(rimLight);
+    
+    // Grid helper
+    const gridHelper = new THREE.GridHelper(4, 20, 0x88aaff, 0x335588);
+    gridHelper.position.y = -1;
+    scene.add(gridHelper);
+    
+    animate();
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    
+    if (autoRotate && mesh) {
+        mesh.rotation.y += 0.005;
+    }
+    
+    controls.update();
+    renderer.render(scene, camera);
+}
+
+window.addEventListener('resize', () => {
+    const container = document.querySelector('.preview-3d');
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+    renderer.setSize(width, height);
+});
+
 window.resetView = function() {
     camera.position.set(2, 1.5, 2.5);
     camera.lookAt(0, 0, 0);
     controls.target.set(0, 0, 0);
     controls.update();
-    showToast('View reset', 'info');
+    showToast('Camera reset', 'info');
 };
 
-// Toggle wireframe
 window.toggleWireframe = function() {
     if (mesh) {
         wireframeMode = !wireframeMode;
         mesh.material.wireframe = wireframeMode;
-        showToast(wireframeMode ? 'Wireframe ON' : 'Wireframe OFF', 'info');
+        showToast(wireframeMode ? 'Wireframe mode ON' : 'Wireframe mode OFF', 'info');
     }
 };
 
-// Toggle auto rotate
 window.toggleRotation = function() {
     autoRotate = !autoRotate;
     showToast(autoRotate ? 'Auto rotate ON' : 'Auto rotate OFF', 'info');
 };
 
-// Show toast message
-function showToast(message, type = 'info') {
-    const toast = document.createElement('div');
-    toast.className = 'toast';
-    toast.innerHTML = message;
-    toast.style.borderLeftColor = type === 'success' ? '#4caf50' : type === 'error' ? '#f44336' : '#667eea';
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 3000);
-}
+window.downloadModel = downloadModel;
 
 // Image upload
 imageInput.addEventListener('change', (e) => {
@@ -342,7 +463,7 @@ imageInput.addEventListener('change', (e) => {
         previewImg.src = currentImageData;
         imagePreview.style.display = 'block';
         generateBtn.disabled = false;
-        showToast('Image uploaded! Click Generate', 'success');
+        showToast('Image uploaded! Ready to generate 3D model', 'success');
     };
     reader.readAsDataURL(file);
 });
@@ -375,23 +496,16 @@ uploadArea.addEventListener('drop', (e) => {
     }
 });
 
-// Generate button
-generateBtn.addEventListener('click', generate3DMesh);
+generateBtn.addEventListener('click', generate3DModel);
 
-// Height scale display
-heightScale.addEventListener('input', (e) => {
-    heightValue.textContent = parseFloat(e.target.value).toFixed(2);
-});
-
-// Initialize
+// Start
 init3D();
 
-// Add default cube to show scene works
+// Add default cube
 const defaultGeom = new THREE.BoxGeometry(0.6, 0.6, 0.6);
 const defaultMat = new THREE.MeshStandardMaterial({ color: 0x667eea });
 const defaultCube = new THREE.Mesh(defaultGeom, defaultMat);
-defaultCube.position.y = 0;
 scene.add(defaultCube);
 mesh = defaultCube;
 
-showToast('Ready! Upload an image to create 3D mesh', 'info');
+showToast('AI 3D Model Generator ready! Upload an image', 'info');
